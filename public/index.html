@@ -126,206 +126,256 @@
     </div>
 
     <script>
-        let ws = null;
-        let coinData = {};
+    let ws = null;
+    let coinData = {};
+    let alarmData = [];
+    
+    function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}`;
         
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}`;
-            
-            ws = new WebSocket(wsUrl);
-            
-            ws.onopen = () => {
-                document.getElementById('status').className = 'status connected';
-                document.getElementById('status').innerHTML = '✅ Sunucuya bağlandı - Veriler akıyor';
-            };
-            
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                switch(data.type) {
-                    case 'init':
-                        handleInitData(data);
-                        break;
-                    case 'update':
-                        handleUpdate(data);
-                        break;
-                    case 'alarm':
-                        handleAlarm(data.alarm);
-                        break;
-                }
-                
-                updateLastUpdate();
-            };
-            
-            ws.onerror = () => {
-                document.getElementById('status').className = 'status disconnected';
-                document.getElementById('status').innerHTML = '❌ Bağlantı hatası';
-            };
-            
-            ws.onclose = () => {
-                document.getElementById('status').className = 'status disconnected';
-                document.getElementById('status').innerHTML = '❌ Bağlantı kesildi - Yeniden bağlanılıyor...';
-                setTimeout(connectWebSocket, 3000);
-            };
-        }
+        ws = new WebSocket(wsUrl);
         
-        function handleInitData(data) {
-            coinData = data.data || {};
-            updateTable();
-            updateStats();
+        ws.onopen = () => {
+            document.getElementById('status').className = 'status connected';
+            document.getElementById('status').innerHTML = '✅ Sunucuya bağlandı - Veriler akıyor';
+        };
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
             
-            if (data.alarms && data.alarms.length > 0) {
-                data.alarms.forEach(alarm => {
-                    handleAlarm(alarm);
-                });
+            switch(data.type) {
+                case 'init':
+                    handleInitData(data);
+                    break;
+                case 'update':
+                    handleUpdate(data);
+                    break;
+                case 'alarm':
+                    handleAlarm(data.alarm);
+                    // Alarm verilerini alarm.html için localStorage'a kaydet
+                    saveAlarmToLocalStorage(data.alarm);
+                    break;
             }
-        }
-        
-        function handleUpdate(data) {
-            coinData[data.symbol] = data.data;
-            updateRow(data.symbol);
-            updateStats();
-        }
-        
-        function handleAlarm(alarm) {
-            const alarmList = document.getElementById('alarmList');
             
-            const alarmDiv = document.createElement('div');
-            alarmDiv.className = 'alarm';
-            alarmDiv.innerHTML = `
-                <strong>${alarm.shortSymbol}</strong> - %${Math.abs(alarm.changePercent).toFixed(2)} 
-                <span class="${alarm.changePercent >= 0 ? 'positive' : 'negative'}">
-                    ${alarm.changePercent >= 0 ? 'YÜKSELİŞ' : 'DÜŞÜŞ'}
+            updateLastUpdate();
+        };
+        
+        ws.onerror = () => {
+            document.getElementById('status').className = 'status disconnected';
+            document.getElementById('status').innerHTML = '❌ Bağlantı hatası';
+        };
+        
+        ws.onclose = () => {
+            document.getElementById('status').className = 'status disconnected';
+            document.getElementById('status').innerHTML = '❌ Bağlantı kesildi - Yeniden bağlanılıyor...';
+            setTimeout(connectWebSocket, 3000);
+        };
+    }
+    
+    function handleInitData(data) {
+        coinData = data.data || {};
+        updateTable();
+        updateStats();
+        
+        if (data.alarms && data.alarms.length > 0) {
+            data.alarms.forEach(alarm => {
+                handleAlarm(alarm);
+                saveAlarmToLocalStorage(alarm);
+            });
+        }
+        
+        // Hacim verilerini kaydet
+        if (data.volumeData) {
+            localStorage.setItem('binanceVolumeData', JSON.stringify(data.volumeData));
+        }
+    }
+    
+    function handleUpdate(data) {
+        coinData[data.symbol] = data.data;
+        updateRow(data.symbol);
+        updateStats();
+        
+        // Hacim verilerini güncelle
+        const volumeData = JSON.parse(localStorage.getItem('binanceVolumeData')) || {};
+        volumeData[data.symbol] = {
+            quoteVolume24h: data.data.quoteVolume24h || 0,
+            volume24h: data.data.volume24h || 0,
+            volumeRatio: data.data.volumeRatio || '0%',
+            price: data.data.price || 0,
+            timestamp: new Date().toISOString()
+        };
+        localStorage.setItem('binanceVolumeData', JSON.stringify(volumeData));
+    }
+    
+    function handleAlarm(alarm) {
+        const alarmList = document.getElementById('alarmList');
+        
+        const alarmDiv = document.createElement('div');
+        alarmDiv.className = 'alarm';
+        
+        let alarmText = '';
+        if (alarm.alarmType.includes('_change')) {
+            const changeValue = alarm.targetPrice;
+            const isPositive = parseFloat(changeValue) >= 0;
+            alarmText = `
+                <strong>${alarm.shortSymbol}</strong> - %${Math.abs(changeValue).toFixed(2)} 
+                <span class="${isPositive ? 'positive' : 'negative'}">
+                    ${isPositive ? 'YÜKSELİŞ' : 'DÜŞÜŞ'}
                 </span><br>
                 <small>${alarm.timeText} - ${alarm.currentPrice.toFixed(4)} USDT</small>
             `;
-            
-            // En üste ekle
-            if (alarmList.children.length > 1) {
-                alarmList.insertBefore(alarmDiv, alarmList.children[1]);
-            } else {
-                alarmList.appendChild(alarmDiv);
-            }
-            
-            // Sadece son 10 alarmı tut
-            const alarms = alarmList.querySelectorAll('.alarm');
-            if (alarms.length > 10) {
-                alarms[alarms.length - 1].remove();
-            }
-            
-            // Alarm sayısını güncelle
-            updateStats();
-            
-            // Bildirim göster
-            showNotification(`${alarm.shortSymbol}: %${alarm.changePercent.toFixed(2)}`);
+        } else if (alarm.alarmType === 'liquidity_percentage') {
+            const percentValue = alarm.targetPrice;
+            const isPositive = parseFloat(percentValue) >= 0;
+            alarmText = `
+                <strong>${alarm.shortSymbol}</strong> - 4S Alt Likidite %${Math.abs(percentValue).toFixed(2)} 
+                <span class="${isPositive ? 'positive' : 'negative'}">
+                    ${isPositive ? 'ÜSTÜNDE' : 'ALTINDA'}
+                </span><br>
+                <small>${alarm.timeText} - ${alarm.currentPrice.toFixed(6)} USDT</small>
+            `;
+        } else {
+            const difference = ((alarm.currentPrice - alarm.targetPrice) / alarm.targetPrice) * 100;
+            const isAbove = difference >= 0;
+            alarmText = `
+                <strong>${alarm.shortSymbol}</strong> - ${alarm.alarmTypeText} 
+                <span class="${isAbove ? 'positive' : 'negative'}">
+                    ${isAbove ? 'YAKLAŞTI' : 'YAKLAŞTI'}
+                </span><br>
+                <small>${alarm.timeText} - ${alarm.currentPrice.toFixed(6)} USDT / Hedef: ${alarm.targetPrice.toFixed(6)}</small>
+            `;
         }
         
-        function updateTable() {
-            const tableBody = document.getElementById('coinTableBody');
-            let html = '';
-            
-            Object.keys(coinData).sort().forEach(symbol => {
-                const data = coinData[symbol];
-                const shortSymbol = symbol.replace('USDT', '');
-                
-                html += `
-                    <tr>
-                        <td><strong>${shortSymbol}</strong></td>
-                        <td>${data.price ? data.price.toFixed(4) : '-'}</td>
-                        <td class="${data.change24h >= 0 ? 'positive' : 'negative'}">
-                            ${data.change24h ? (data.change24h > 0 ? '+' : '') + data.change24h.toFixed(2) + '%' : '-'}
-                        </td>
-                        <td>${formatVolume(data.volume24h)}</td>
-                        <td>${new Date(data.lastUpdate).toLocaleTimeString('tr-TR')}</td>
-                    </tr>
-                `;
-            });
-            
-            tableBody.innerHTML = html;
+        alarmDiv.innerHTML = alarmText;
+        
+        // En üste ekle
+        if (alarmList.children.length > 1) {
+            alarmList.insertBefore(alarmDiv, alarmList.children[1]);
+        } else {
+            alarmList.appendChild(alarmDiv);
         }
         
-        function updateRow(symbol) {
+        // Sadece son 10 alarmı tut
+        const alarms = alarmList.querySelectorAll('.alarm');
+        if (alarms.length > 10) {
+            alarms[alarms.length - 1].remove();
+        }
+        
+        updateStats();
+        
+        // Bildirim göster
+        showNotification(`${alarm.shortSymbol}: ${alarm.alarmTypeText}`);
+    }
+    
+    function saveAlarmToLocalStorage(alarm) {
+        let alarms = JSON.parse(localStorage.getItem('binanceAlarmMessages')) || [];
+        alarms.unshift(alarm);
+        
+        // Sadece son 100 alarmı tut
+        if (alarms.length > 100) {
+            alarms = alarms.slice(0, 100);
+        }
+        
+        localStorage.setItem('binanceAlarmMessages', JSON.stringify(alarms));
+    }
+    
+    function updateTable() {
+        const tableBody = document.getElementById('coinTableBody');
+        let html = '';
+        
+        Object.keys(coinData).sort().forEach(symbol => {
             const data = coinData[symbol];
             const shortSymbol = symbol.replace('USDT', '');
             
-            // Tabloda satırı bul
-            const rows = document.querySelectorAll('#coinTableBody tr');
-            for (let row of rows) {
-                if (row.cells[0].textContent.includes(shortSymbol)) {
-                    row.cells[1].textContent = data.price ? data.price.toFixed(4) : '-';
-                    row.cells[2].textContent = data.change24h ? 
-                        (data.change24h > 0 ? '+' : '') + data.change24h.toFixed(2) + '%' : '-';
-                    row.cells[2].className = data.change24h >= 0 ? 'positive' : 'negative';
-                    row.cells[3].textContent = formatVolume(data.volume24h);
-                    row.cells[4].textContent = new Date(data.lastUpdate).toLocaleTimeString('tr-TR');
-                    break;
+            html += `
+                <tr>
+                    <td><strong>${shortSymbol}</strong></td>
+                    <td>${data.price ? data.price.toFixed(6) : '-'}</td>
+                    <td class="${data.change24h >= 0 ? 'positive' : 'negative'}">
+                        ${data.change24h ? (data.change24h > 0 ? '+' : '') + data.change24h.toFixed(2) + '%' : '-'}
+                    </td>
+                    <td>${formatVolume(data.quoteVolume24h)}</td>
+                    <td>${new Date(data.lastUpdate).toLocaleTimeString('tr-TR')}</td>
+                </tr>
+            `;
+        });
+        
+        tableBody.innerHTML = html;
+    }
+    
+    function updateRow(symbol) {
+        const data = coinData[symbol];
+        const shortSymbol = symbol.replace('USDT', '');
+        
+        // Tabloda satırı bul
+        const rows = document.querySelectorAll('#coinTableBody tr');
+        for (let row of rows) {
+            if (row.cells[0].textContent.includes(shortSymbol)) {
+                row.cells[1].textContent = data.price ? data.price.toFixed(6) : '-';
+                row.cells[2].textContent = data.change24h ? 
+                    (data.change24h > 0 ? '+' : '') + data.change24h.toFixed(2) + '%' : '-';
+                row.cells[2].className = data.change24h >= 0 ? 'positive' : 'negative';
+                row.cells[3].textContent = formatVolume(data.quoteVolume24h);
+                row.cells[4].textContent = new Date(data.lastUpdate).toLocaleTimeString('tr-TR');
+                break;
+            }
+        }
+    }
+    
+    function updateStats() {
+        document.getElementById('coinCount').textContent = Object.keys(coinData).length;
+        
+        // Alarm sayısını hesapla (alarm listesinden)
+        const alarmCount = document.querySelectorAll('.alarm').length;
+        document.getElementById('alarmCount').textContent = alarmCount;
+    }
+    
+    function updateLastUpdate() {
+        document.getElementById('lastUpdate').textContent = 
+            new Date().toLocaleTimeString('tr-TR');
+    }
+    
+    function formatVolume(value) {
+        if (!value) return '-';
+        if (value >= 1000000000) return (value / 1000000000).toFixed(2) + 'B';
+        if (value >= 1000000) return (value / 1000000).toFixed(2) + 'M';
+        if (value >= 1000) return (value / 1000).toFixed(2) + 'K';
+        return value.toFixed(2);
+    }
+    
+    function showNotification(message) {
+        if (Notification.permission === "granted") {
+            new Notification("Binance Alarm", {
+                body: message,
+                icon: "https://cryptologos.cc/logos/binance-coin-bnb-logo.png"
+            });
+        } else if (Notification.permission === "default") {
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    new Notification("Binance Alarm", {
+                        body: message,
+                        icon: "https://cryptologos.cc/logos/binance-coin-bnb-logo.png"
+                    });
                 }
-            }
+            });
+        }
+    }
+    
+    // Sayfa yüklendiğinde
+    window.onload = () => {
+        // Bildirim izni iste
+        if (Notification.permission === "default") {
+            Notification.requestPermission();
         }
         
-        function updateStats() {
-            document.getElementById('coinCount').textContent = Object.keys(coinData).length;
-            
-            // Alarm sayısını hesapla (alarm listesinden)
-            const alarmCount = document.querySelectorAll('.alarm').length;
-            document.getElementById('alarmCount').textContent = alarmCount;
-        }
+        // WebSocket bağlantısını kur
+        connectWebSocket();
         
-        function updateLastUpdate() {
-            document.getElementById('lastUpdate').textContent = 
-                new Date().toLocaleTimeString('tr-TR');
-        }
-        
-        function formatVolume(value) {
-            if (!value) return '-';
-            if (value >= 1000000000) return (value / 1000000000).toFixed(2) + 'B';
-            if (value >= 1000000) return (value / 1000000).toFixed(2) + 'M';
-            if (value >= 1000) return (value / 1000).toFixed(2) + 'K';
-            return value.toFixed(2);
-        }
-        
-        function showNotification(message) {
-            if (Notification.permission === "granted") {
-                new Notification("Binance Alarm", {
-                    body: message,
-                    icon: "https://cryptologos.cc/logos/binance-coin-bnb-logo.png"
-                });
-            } else if (Notification.permission === "default") {
-                Notification.requestPermission().then(permission => {
-                    if (permission === "granted") {
-                        new Notification("Binance Alarm", {
-                            body: message,
-                            icon: "https://cryptologos.cc/logos/binance-coin-bnb-logo.png"
-                        });
-                    }
-                });
-            }
-        }
-        
-        // Sayfa yüklendiğinde
-        window.onload = () => {
-            // Bildirim izni iste
-            if (Notification.permission === "default") {
-                Notification.requestPermission();
-            }
-            
-            // WebSocket bağlantısını kur
-            connectWebSocket();
-            
-            // Her 60 saniyede bir API'den veri al (backup)
-            setInterval(async () => {
-                try {
-                    const response = await fetch('/api/data');
-                    const data = await response.json();
-                    coinData = data;
-                    updateTable();
-                    updateStats();
-                } catch (error) {
-                    console.log('API backup hatası:', error);
-                }
-            }, 60000);
-        };
-    </script>
+        // Alarm verilerini temizle (opsiyonel, test için)
+        // localStorage.removeItem('binanceAlarmMessages');
+        // localStorage.removeItem('binanceVolumeData');
+    };
+</script>
 </body>
 </html>
