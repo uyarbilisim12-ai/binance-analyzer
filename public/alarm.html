@@ -850,329 +850,150 @@
         </div>
     </div>
 
-    <script>
-        const ALARM_STORAGE_KEY = 'binanceAlarmMessages';
-        const VOLUME_STORAGE_KEY = 'binanceVolumeData';
-        
-        // Alarm türü CSS sınıfları
-        const alarmTypeClasses = {
-            'upper_liquidity': {class: 'upper', typeClass: 'type-upper', name: 'Üst Likidite'},
-            'lower_liquidity': {class: 'lower', typeClass: 'type-lower', name: 'Alt Likidite'},
-            '20m_high': {class: 'high', typeClass: 'type-high', name: '20M Yüksek'},
-            '20m_low': {class: 'low', typeClass: 'type-low', name: '20M Düşük'},
-            '15d_change': {class: 'change', typeClass: 'type-change', name: '15D% Değişim'},
-            '4s_change': {class: 'change', typeClass: 'type-change', name: '4S% Değişim'},
-            '1g_change': {class: 'change', typeClass: 'type-change', name: '1G% Değişim'},
-            'ema50_above': {class: 'ema', typeClass: 'type-ema', name: 'EMA50 Üstü'},
-            'ema50_below': {class: 'ema', typeClass: 'type-ema', name: 'EMA50 Altı'},
-            'liquidity_percentage': {class: 'change', typeClass: 'type-change', name: 'Likidite %'}
-        };
-        
-        // Filtre durumu
-        let currentFilters = {
-            coin: 'all',
-            type: 'all',
-            time: 'all'
-        };
-        
-        // Seçili coin'leri saklamak için Set
-        let selectedCoins = new Set();
-        
-        // Alarmları yükle ve göster
-        function loadAlarms() {
-            const alarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
-            const volumeData = JSON.parse(localStorage.getItem(VOLUME_STORAGE_KEY)) || {};
-            const alarmList = document.getElementById('alarmList');
+   <script>
+    const ALARM_STORAGE_KEY = 'binanceAlarmMessages';
+    const VOLUME_STORAGE_KEY = 'binanceVolumeData';
+    
+    // Alarm türü CSS sınıfları
+    const alarmTypeClasses = {
+        'upper_liquidity': {class: 'upper', typeClass: 'type-upper', name: 'Üst Likidite'},
+        'lower_liquidity': {class: 'lower', typeClass: 'type-lower', name: 'Alt Likidite'},
+        '20m_high': {class: 'high', typeClass: 'type-high', name: '20M Yüksek'},
+        '20m_low': {class: 'low', typeClass: 'type-low', name: '20M Düşük'},
+        '15d_change': {class: 'change', typeClass: 'type-change', name: '15D% Değişim'},
+        '4s_change': {class: 'change', typeClass: 'type-change', name: '4S% Değişim'},
+        '1g_change': {class: 'change', typeClass: 'type-change', name: '1G% Değişim'},
+        'ema50_above': {class: 'ema', typeClass: 'type-ema', name: 'EMA50 Üstü'},
+        'ema50_below': {class: 'ema', typeClass: 'type-ema', name: 'EMA50 Altı'},
+        'liquidity_percentage': {class: 'change', typeClass: 'type-change', name: 'Likidite %'},
+        'price_change': {class: 'change', typeClass: 'type-change', name: 'Fiyat Değişimi'}
+    };
+    
+    // Filtre durumu
+    let currentFilters = {
+        coin: 'all',
+        type: 'all',
+        time: 'all'
+    };
+    
+    // Seçili coin'leri saklamak için Set
+    let selectedCoins = new Set();
+    
+    // Sunucudan alarm verilerini çek
+    async function fetchAlarmsFromServer() {
+        try {
+            console.log('Sunucudan alarm verileri çekiliyor...');
+            const response = await fetch('/api/alarms');
+            if (!response.ok) throw new Error(`API hatası: ${response.status}`);
             
-            // Coin filtre seçeneklerini güncelle
-            updateCoinFilterOptions(alarms);
+            const serverAlarms = await response.json();
+            console.log(`Sunucudan ${serverAlarms.length} alarm alındı`);
             
-            // İstatistikleri hesapla
-            updateStatistics(alarms);
+            // LocalStorage'daki mevcut alarmları al
+            let localAlarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
             
-            // Alarmları filtrele
-            const filteredAlarms = filterAlarms(alarms);
-            
-            if (filteredAlarms.length === 0) {
-                alarmList.innerHTML = `
-                    <div class="no-alarms">
-                        <p>📭 ${getNoAlarmsMessage()}</p>
-                        <p><small>${getFilterInfoText()}</small></p>
-                    </div>
-                `;
-                updateSelectedCount();
-                return;
-            }
-            
-            let html = '';
-            
-            filteredAlarms.forEach(alarm => {
-                const typeInfo = alarmTypeClasses[alarm.alarmType] || {class: '', typeClass: '', name: alarm.alarmType};
-                const isSelected = selectedCoins.has(alarm.symbol);
-                const shortSymbol = alarm.shortSymbol || alarm.symbol.replace('USDT', '');
+            // Server alarmlarını local'e ekle (çift kayıt olmaması için)
+            serverAlarms.forEach(serverAlarm => {
+                const exists = localAlarms.find(localAlarm => 
+                    localAlarm.id === serverAlarm.id || (
+                        localAlarm.symbol === serverAlarm.symbol && 
+                        localAlarm.alarmType === serverAlarm.alarmType &&
+                        Math.abs(new Date(localAlarm.timestamp).getTime() - new Date(serverAlarm.timestamp).getTime()) < 60000
+                    )
+                );
                 
-                // Hacim verilerini al
-                const volumeInfo = volumeData[alarm.symbol] || {};
-                const quoteVolume = volumeInfo.quoteVolume24h || 0;
-                const coinVolume = volumeInfo.volume24h || 0;
-                const volumeRatio = volumeInfo.volumeRatio || '0%';
-                const volumePrice = volumeInfo.price || alarm.currentPrice;
-                
-                // Zaman formatı
-                const time = new Date(alarm.timestamp);
-                const timeText = alarm.timeText || time.toLocaleTimeString('tr-TR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-                const dateText = time.toLocaleDateString('tr-TR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                });
-                
-                // Ne kadar zaman önce
-                const timeAgo = getTimeAgo(time);
-                
-                // Hacim bilgileri HTML'i
-                const volumeHtml = `
-                    <div class="volume-info">
-                        <div class="volume-item">
-                            <span class="volume-label">24S USDT:</span>
-                            <span class="volume-value">${formatVolume(quoteVolume)}</span>
-                        </div>
-                        <div class="volume-item">
-                            <span class="volume-label">24S Coin:</span>
-                            <span class="volume-value">${formatVolume(coinVolume)}</span>
-                        </div>
-                        <div class="volume-item">
-                            <span class="volume-label">Hacim Oranı:</span>
-                            <span class="volume-value ${getVolumeRatioClass(volumeRatio)}">${volumeRatio}</span>
-                        </div>
-                    </div>
-                `;
-                
-                // Alarm tipine göre farklı görüntüleme
-                if (alarm.alarmType.includes('_change')) {
-                    // Değişim yüzdesi alarmları
-                    const changeValue = alarm.targetPrice;
-                    const isPositive = parseFloat(changeValue) >= 0;
-                    const changeClass = isPositive ? 'diff-positive' : 'diff-negative';
-                    const changeText = isPositive ? 'YÜKSELİŞ' : 'DÜŞÜŞ';
-                    
-                    html += `
-                        <div class="alarm-item ${typeInfo.class}">
-                            <div class="alarm-header">
-                                <div class="coin-info">
-                                    <div class="coin-symbol-container">
-                                        <input type="checkbox" class="coin-checkbox" 
-                                               data-symbol="${alarm.symbol}"
-                                               ${isSelected ? 'checked' : ''}
-                                               onchange="toggleCoinSelection('${alarm.symbol}', this)">
-                                        <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
-                                              onclick="copySingleCoin('${alarm.symbol}')">
-                                            ${shortSymbol}
-                                        </span>
-                                        <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
-                                            📋
-                                        </button>
-                                    </div>
-                                    <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
-                                </div>
-                                <div class="time-info">
-                                    <div>${timeText}</div>
-                                    <div>${dateText} • ${timeAgo}</div>
-                                </div>
-                            </div>
-                            
-                            <div class="price-info">
-                                <div class="price-item">
-                                    <div class="price-label">Mevcut Fiyat</div>
-                                    <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Değişim Oranı</div>
-                                    <div class="price-value target-price ${isPositive ? 'positive' : 'negative'}">
-                                        ${isPositive ? '+' : ''}${Math.abs(parseFloat(changeValue)).toFixed(2)}%
-                                    </div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Durum</div>
-                                    <div class="price-value">
-                                        <span class="difference ${changeClass}">
-                                            ${changeText}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            ${volumeHtml}
-                        </div>
-                    `;
-                } else if (alarm.alarmType === 'liquidity_percentage') {
-                    // Likidite yüzdesi alarmları
-                    const percentValue = alarm.targetPrice;
-                    const isPositive = parseFloat(percentValue) >= 0;
-                    const changeClass = isPositive ? 'diff-positive' : 'diff-negative';
-                    const changeText = isPositive ? 'ÜSTÜNDE' : 'ALTINDA';
-                    
-                    html += `
-                        <div class="alarm-item ${typeInfo.class}">
-                            <div class="alarm-header">
-                                <div class="coin-info">
-                                    <div class="coin-symbol-container">
-                                        <input type="checkbox" class="coin-checkbox" 
-                                               data-symbol="${alarm.symbol}"
-                                               ${isSelected ? 'checked' : ''}
-                                               onchange="toggleCoinSelection('${alarm.symbol}', this)">
-                                        <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
-                                              onclick="copySingleCoin('${alarm.symbol}')">
-                                            ${shortSymbol}
-                                        </span>
-                                        <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
-                                            📋
-                                        </button>
-                                    </div>
-                                    <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
-                                </div>
-                                <div class="time-info">
-                                    <div>${timeText}</div>
-                                    <div>${dateText} • ${timeAgo}</div>
-                                </div>
-                            </div>
-                            
-                            <div class="price-info">
-                                <div class="price-item">
-                                    <div class="price-label">Mevcut Fiyat</div>
-                                    <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Alt Likidite Farkı</div>
-                                    <div class="price-value target-price ${isPositive ? 'positive' : 'negative'}">
-                                        ${isPositive ? '+' : ''}${Math.abs(parseFloat(percentValue)).toFixed(2)}%
-                                    </div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Konum</div>
-                                    <div class="price-value">
-                                        <span class="difference ${changeClass}">
-                                            ${changeText}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            ${volumeHtml}
-                        </div>
-                    `;
-                } else if (alarm.alarmType.includes('ema50')) {
-                    // EMA50 alarmları
-                    const isAbove = alarm.alarmType.includes('above');
-                    const diffClass = isAbove ? 'diff-positive' : 'diff-negative';
-                    const emaDirection = isAbove ? 'ÜZERİNDE' : 'ALTINDA';
-                    
-                    html += `
-                        <div class="alarm-item ${typeInfo.class}">
-                            <div class="alarm-header">
-                                <div class="coin-info">
-                                    <div class="coin-symbol-container">
-                                        <input type="checkbox" class="coin-checkbox" 
-                                               data-symbol="${alarm.symbol}"
-                                               ${isSelected ? 'checked' : ''}
-                                               onchange="toggleCoinSelection('${alarm.symbol}', this)">
-                                        <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
-                                              onclick="copySingleCoin('${alarm.symbol}')">
-                                            ${shortSymbol}
-                                        </span>
-                                        <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
-                                            📋
-                                        </button>
-                                    </div>
-                                    <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
-                                </div>
-                                <div class="time-info">
-                                    <div>${timeText}</div>
-                                    <div>${dateText} • ${timeAgo}</div>
-                                </div>
-                            </div>
-                            
-                            <div class="price-info">
-                                <div class="price-item">
-                                    <div class="price-label">Mevcut Fiyat</div>
-                                    <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">EMA50 Seviyesi</div>
-                                    <div class="price-value target-price">${alarm.targetPrice.toFixed(6)}</div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Konum</div>
-                                    <div class="price-value">
-                                        <span class="difference ${diffClass}">
-                                            ${emaDirection}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            ${volumeHtml}
-                        </div>
-                    `;
-                } else {
-                    // Diğer alarmlar (likidite ve high/low)
-                    const difference = ((alarm.currentPrice - alarm.targetPrice) / alarm.targetPrice) * 100;
-                    const diffClass = difference >= 0 ? 'diff-positive' : 'diff-negative';
-                    const diffSymbol = difference >= 0 ? '+' : '';
-                    const diffText = difference >= 0 ? 'ÜZERİNDE' : 'ALTINDA';
-                    
-                    html += `
-                        <div class="alarm-item ${typeInfo.class}">
-                            <div class="alarm-header">
-                                <div class="coin-info">
-                                    <div class="coin-symbol-container">
-                                        <input type="checkbox" class="coin-checkbox" 
-                                               data-symbol="${alarm.symbol}"
-                                               ${isSelected ? 'checked' : ''}
-                                               onchange="toggleCoinSelection('${alarm.symbol}', this)">
-                                        <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
-                                              onclick="copySingleCoin('${alarm.symbol}')">
-                                            ${shortSymbol}
-                                        </span>
-                                        <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
-                                            📋
-                                        </button>
-                                    </div>
-                                    <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
-                                </div>
-                                <div class="time-info">
-                                    <div>${timeText}</div>
-                                    <div>${dateText} • ${timeAgo}</div>
-                                </div>
-                            </div>
-                            
-                            <div class="price-info">
-                                <div class="price-item">
-                                    <div class="price-label">Mevcut Fiyat</div>
-                                    <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Hedef Fiyat</div>
-                                    <div class="price-value target-price">${alarm.targetPrice.toFixed(6)}</div>
-                                </div>
-                                <div class="price-item">
-                                    <div class="price-label">Fark</div>
-                                    <div class="price-value">
-                                        ${diffSymbol}${Math.abs(difference).toFixed(2)}%
-                                        <span class="difference ${diffClass}">
-                                            ${diffText}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                            ${volumeHtml}
-                        </div>
-                    `;
+                if (!exists) {
+                    localAlarms.unshift(serverAlarm);
                 }
             });
             
-            alarmList.innerHTML = html;
+            // ID'leri kontrol et (eski alarmlar için ID oluştur)
+            localAlarms = localAlarms.map(alarm => {
+                if (!alarm.id) {
+                    return {
+                        ...alarm,
+                        id: Date.now() + Math.random().toString(36).substr(2, 9)
+                    };
+                }
+                return alarm;
+            });
+            
+            // Sadece son 100 alarmı tut
+            if (localAlarms.length > 100) {
+                localAlarms = localAlarms.slice(0, 100);
+            }
+            
+            // LocalStorage'a kaydet
+            localStorage.setItem(ALARM_STORAGE_KEY, JSON.stringify(localAlarms));
+            console.log(`Toplam ${localAlarms.length} alarm kaydedildi`);
+            
+            // Hacim verilerini de çek
+            await fetchVolumeDataFromServer();
+            
+            return localAlarms;
+        } catch (error) {
+            console.error('Sunucudan alarm çekme hatası:', error);
+            // Hata durumunda local storage'dan yükle
+            const localAlarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
+            console.log(`Local storage'dan ${localAlarms.length} alarm yüklendi`);
+            return localAlarms;
+        }
+    }
+    
+    // Sunucudan hacim verilerini çek
+    async function fetchVolumeDataFromServer() {
+        try {
+            console.log('Hacim verileri çekiliyor...');
+            const response = await fetch('/api/volume-data');
+            if (!response.ok) throw new Error(`API hatası: ${response.status}`);
+            
+            const serverVolumeData = await response.json();
+            const localVolumeData = JSON.parse(localStorage.getItem(VOLUME_STORAGE_KEY)) || {};
+            
+            // Server verilerini local'e merge et
+            Object.keys(serverVolumeData).forEach(symbol => {
+                localVolumeData[symbol] = {
+                    ...localVolumeData[symbol],
+                    ...serverVolumeData[symbol],
+                    lastUpdate: new Date().toISOString()
+                };
+            });
+            
+            localStorage.setItem(VOLUME_STORAGE_KEY, JSON.stringify(localVolumeData));
+            console.log(`Hacim verileri güncellendi: ${Object.keys(localVolumeData).length} coin`);
+        } catch (error) {
+            console.error('Hacim verisi çekme hatası:', error);
+        }
+    }
+    
+    // Alarmları yükle ve göster
+    async function loadAlarms() {
+        console.log('Alarmlar yükleniyor...');
+        
+        // Önce sunucudan alarmları çek
+        const alarms = await fetchAlarmsFromServer();
+        const volumeData = JSON.parse(localStorage.getItem(VOLUME_STORAGE_KEY)) || {};
+        const alarmList = document.getElementById('alarmList');
+        
+        console.log(`Toplam ${alarms.length} alarm işleniyor`);
+        
+        // Coin filtre seçeneklerini güncelle
+        updateCoinFilterOptions(alarms);
+        
+        // İstatistikleri hesapla
+        updateStatistics(alarms);
+        
+        // Alarmları filtrele
+        const filteredAlarms = filterAlarms(alarms);
+        
+        if (filteredAlarms.length === 0) {
+            alarmList.innerHTML = `
+                <div class="no-alarms">
+                    <p>📭 ${getNoAlarmsMessage()}</p>
+                    <p><small>${getFilterInfoText()}</small></p>
+                </div>
+            `;
+            updateSelectedCount();
             
             // Son güncelleme zamanını göster
             document.getElementById('lastUpdate').textContent = 
@@ -1180,528 +1001,832 @@
                     hour: '2-digit',
                     minute: '2-digit'
                 })}`;
-            
-            // Filtre bilgisini güncelle
-            updateFilterInfo();
-            
-            // Seçili sayısını güncelle
-            updateSelectedCount();
+            return;
         }
         
-        // Hacim oranı sınıfını belirle
-        function getVolumeRatioClass(ratioStr) {
-            if (ratioStr === '-' || !ratioStr) return '';
-            
-            const ratio = parseFloat(ratioStr);
-            if (isNaN(ratio)) return '';
-            
-            if (ratio > 120) return 'positive'; // %120'den fazla = pozitif
-            if (ratio < 80) return 'negative';  // %80'den az = negatif
-            return ''; // %80-120 arası = nötr
-        }
+        let html = '';
         
-        // Hacim formatlama
-        function formatVolume(value) {
-            if (value === undefined || value === null || value === 0) return '-';
+        filteredAlarms.forEach(alarm => {
+            const typeInfo = alarmTypeClasses[alarm.alarmType] || {class: '', typeClass: '', name: alarm.alarmType};
+            const isSelected = selectedCoins.has(alarm.symbol);
+            const shortSymbol = alarm.shortSymbol || alarm.symbol.replace('USDT', '');
             
-            const num = parseFloat(value);
+            // Hacim verilerini al
+            const volumeInfo = volumeData[alarm.symbol] || {};
+            const quoteVolume = volumeInfo.quoteVolume24h || 0;
+            const coinVolume = volumeInfo.volume24h || 0;
+            const volumeRatio = volumeInfo.volumeRatio || '0%';
+            const volumePrice = volumeInfo.price || alarm.currentPrice;
             
-            if (num >= 1000000000) {
-                return (num / 1000000000).toFixed(2) + 'B';
-            } else if (num >= 1000000) {
-                return (num / 1000000).toFixed(2) + 'M';
-            } else if (num >= 1000) {
-                return (num / 1000000).toFixed(2) + 'K';
-            } else if (num < 1) {
-                return num.toFixed(6);
-            } else {
-                return num.toFixed(2);
-            }
-        }
-        
-        // Tekil coin kopyalama
-        function copySingleCoin(symbol, event = null) {
-            if (event) {
-                event.stopPropagation();
-            }
-            
-            const fullSymbol = symbol.includes('USDT') ? symbol : symbol + 'USDT';
-            
-            navigator.clipboard.writeText(fullSymbol).then(() => {
-                showNotification(`📋 ${fullSymbol} kopyalandı`);
-            }).catch(err => {
-                console.error('Kopyalama hatası:', err);
-                showNotification('❌ Kopyalama başarısız!', true);
+            // Zaman formatı
+            const time = new Date(alarm.timestamp);
+            const timeText = alarm.timeText || time.toLocaleTimeString('tr-TR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
             });
+            const dateText = time.toLocaleDateString('tr-TR', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+            
+            // Ne kadar zaman önce
+            const timeAgo = getTimeAgo(time);
+            
+            // Hacim bilgileri HTML'i
+            const volumeHtml = `
+                <div class="volume-info">
+                    <div class="volume-item">
+                        <span class="volume-label">24S USDT:</span>
+                        <span class="volume-value">${formatVolume(quoteVolume)}</span>
+                    </div>
+                    <div class="volume-item">
+                        <span class="volume-label">24S Coin:</span>
+                        <span class="volume-value">${formatVolume(coinVolume)}</span>
+                    </div>
+                    <div class="volume-item">
+                        <span class="volume-label">Hacim Oranı:</span>
+                        <span class="volume-value ${getVolumeRatioClass(volumeRatio)}">${volumeRatio}</span>
+                    </div>
+                </div>
+            `;
+            
+            // Alarm tipine göre farklı görüntüleme
+            if (alarm.alarmType.includes('_change') && alarm.alarmType !== 'liquidity_percentage') {
+                // Değişim yüzdesi alarmları
+                const changeValue = alarm.changePercent || alarm.targetPrice || 0;
+                const isPositive = parseFloat(changeValue) >= 0;
+                const changeClass = isPositive ? 'diff-positive' : 'diff-negative';
+                const changeText = isPositive ? 'YÜKSELİŞ' : 'DÜŞÜŞ';
+                
+                html += `
+                    <div class="alarm-item ${typeInfo.class}">
+                        <div class="alarm-header">
+                            <div class="coin-info">
+                                <div class="coin-symbol-container">
+                                    <input type="checkbox" class="coin-checkbox" 
+                                           data-symbol="${alarm.symbol}"
+                                           ${isSelected ? 'checked' : ''}
+                                           onchange="toggleCoinSelection('${alarm.symbol}', this)">
+                                    <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
+                                          onclick="copySingleCoin('${alarm.symbol}')">
+                                        ${shortSymbol}
+                                    </span>
+                                    <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
+                                        📋
+                                    </button>
+                                </div>
+                                <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
+                            </div>
+                            <div class="time-info">
+                                <div>${timeText}</div>
+                                <div>${dateText} • ${timeAgo}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="price-info">
+                            <div class="price-item">
+                                <div class="price-label">Mevcut Fiyat</div>
+                                <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">Değişim Oranı</div>
+                                <div class="price-value target-price ${isPositive ? 'positive' : 'negative'}">
+                                    ${isPositive ? '+' : ''}${Math.abs(parseFloat(changeValue)).toFixed(2)}%
+                                </div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">Durum</div>
+                                <div class="price-value">
+                                    <span class="difference ${changeClass}">
+                                        ${changeText}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        ${volumeHtml}
+                    </div>
+                `;
+            } else if (alarm.alarmType === 'liquidity_percentage') {
+                // Likidite yüzdesi alarmları
+                const percentValue = alarm.targetPrice || 0;
+                const isPositive = parseFloat(percentValue) >= 0;
+                const changeClass = isPositive ? 'diff-positive' : 'diff-negative';
+                const changeText = isPositive ? 'ÜSTÜNDE' : 'ALTINDA';
+                
+                html += `
+                    <div class="alarm-item ${typeInfo.class}">
+                        <div class="alarm-header">
+                            <div class="coin-info">
+                                <div class="coin-symbol-container">
+                                    <input type="checkbox" class="coin-checkbox" 
+                                           data-symbol="${alarm.symbol}"
+                                           ${isSelected ? 'checked' : ''}
+                                           onchange="toggleCoinSelection('${alarm.symbol}', this)">
+                                    <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
+                                          onclick="copySingleCoin('${alarm.symbol}')">
+                                        ${shortSymbol}
+                                    </span>
+                                    <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
+                                        📋
+                                    </button>
+                                </div>
+                                <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
+                            </div>
+                            <div class="time-info">
+                                <div>${timeText}</div>
+                                <div>${dateText} • ${timeAgo}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="price-info">
+                            <div class="price-item">
+                                <div class="price-label">Mevcut Fiyat</div>
+                                <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">4S Alt Likidite Farkı</div>
+                                <div class="price-value target-price ${isPositive ? 'positive' : 'negative'}">
+                                    ${isPositive ? '+' : ''}${Math.abs(parseFloat(percentValue)).toFixed(2)}%
+                                </div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">Konum</div>
+                                <div class="price-value">
+                                    <span class="difference ${changeClass}">
+                                        ${changeText}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        ${volumeHtml}
+                    </div>
+                `;
+            } else if (alarm.alarmType.includes('ema50')) {
+                // EMA50 alarmları
+                const isAbove = alarm.alarmType.includes('above');
+                const diffClass = isAbove ? 'diff-positive' : 'diff-negative';
+                const emaDirection = isAbove ? 'ÜZERİNDE' : 'ALTINDA';
+                
+                html += `
+                    <div class="alarm-item ${typeInfo.class}">
+                        <div class="alarm-header">
+                            <div class="coin-info">
+                                <div class="coin-symbol-container">
+                                    <input type="checkbox" class="coin-checkbox" 
+                                           data-symbol="${alarm.symbol}"
+                                           ${isSelected ? 'checked' : ''}
+                                           onchange="toggleCoinSelection('${alarm.symbol}', this)">
+                                    <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
+                                          onclick="copySingleCoin('${alarm.symbol}')">
+                                        ${shortSymbol}
+                                    </span>
+                                    <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
+                                        📋
+                                    </button>
+                                </div>
+                                <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
+                            </div>
+                            <div class="time-info">
+                                <div>${timeText}</div>
+                                <div>${dateText} • ${timeAgo}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="price-info">
+                            <div class="price-item">
+                                <div class="price-label">Mevcut Fiyat</div>
+                                <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">EMA50 Seviyesi</div>
+                                <div class="price-value target-price">${(alarm.targetPrice || 0).toFixed(6)}</div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">Konum</div>
+                                <div class="price-value">
+                                    <span class="difference ${diffClass}">
+                                        ${emaDirection}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        ${volumeHtml}
+                    </div>
+                `;
+            } else {
+                // Diğer alarmlar (likidite ve high/low)
+                const targetPrice = alarm.targetPrice || 0;
+                const difference = targetPrice !== 0 ? ((alarm.currentPrice - targetPrice) / targetPrice) * 100 : 0;
+                const diffClass = difference >= 0 ? 'diff-positive' : 'diff-negative';
+                const diffSymbol = difference >= 0 ? '+' : '';
+                const diffText = difference >= 0 ? 'ÜZERİNDE' : 'ALTINDA';
+                
+                html += `
+                    <div class="alarm-item ${typeInfo.class}">
+                        <div class="alarm-header">
+                            <div class="coin-info">
+                                <div class="coin-symbol-container">
+                                    <input type="checkbox" class="coin-checkbox" 
+                                           data-symbol="${alarm.symbol}"
+                                           ${isSelected ? 'checked' : ''}
+                                           onchange="toggleCoinSelection('${alarm.symbol}', this)">
+                                    <span class="coin-symbol ${isSelected ? 'selected' : ''}" 
+                                          onclick="copySingleCoin('${alarm.symbol}')">
+                                        ${shortSymbol}
+                                    </span>
+                                    <button class="copy-icon" onclick="copySingleCoin('${alarm.symbol}', event)">
+                                        📋
+                                    </button>
+                                </div>
+                                <span class="alarm-type ${typeInfo.typeClass}">${typeInfo.name}</span>
+                            </div>
+                            <div class="time-info">
+                                <div>${timeText}</div>
+                                <div>${dateText} • ${timeAgo}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="price-info">
+                            <div class="price-item">
+                                <div class="price-label">Mevcut Fiyat</div>
+                                <div class="price-value current-price">${volumePrice.toFixed(6)}</div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">Hedef Fiyat</div>
+                                <div class="price-value target-price">${targetPrice.toFixed(6)}</div>
+                            </div>
+                            <div class="price-item">
+                                <div class="price-label">Fark</div>
+                                <div class="price-value">
+                                    ${targetPrice !== 0 ? `${diffSymbol}${Math.abs(difference).toFixed(2)}%` : '-'}
+                                    ${targetPrice !== 0 ? `<span class="difference ${diffClass}">
+                                        ${diffText}
+                                    </span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        ${volumeHtml}
+                    </div>
+                `;
+            }
+        });
+        
+        alarmList.innerHTML = html;
+        
+        // Son güncelleme zamanını göster
+        document.getElementById('lastUpdate').textContent = 
+            `Son güncelleme: ${new Date().toLocaleTimeString('tr-TR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            })}`;
+        
+        // Filtre bilgisini güncelle
+        updateFilterInfo();
+        
+        // Seçili sayısını güncelle
+        updateSelectedCount();
+        
+        console.log('Alarmlar başarıyla yüklendi');
+    }
+    
+    // Hacim oranı sınıfını belirle
+    function getVolumeRatioClass(ratioStr) {
+        if (ratioStr === '-' || !ratioStr) return '';
+        
+        const ratio = parseFloat(ratioStr);
+        if (isNaN(ratio)) return '';
+        
+        if (ratio > 120) return 'positive'; // %120'den fazla = pozitif
+        if (ratio < 80) return 'negative';  // %80'den az = negatif
+        return ''; // %80-120 arası = nötr
+    }
+    
+    // Hacim formatlama
+    function formatVolume(value) {
+        if (value === undefined || value === null || value === 0) return '-';
+        
+        const num = parseFloat(value);
+        
+        if (num >= 1000000000) {
+            return (num / 1000000000).toFixed(2) + 'B';
+        } else if (num >= 1000000) {
+            return (num / 1000000).toFixed(2) + 'M';
+        } else if (num >= 1000) {
+            return (num / 1000000).toFixed(2) + 'K';
+        } else if (num < 1) {
+            return num.toFixed(6);
+        } else {
+            return num.toFixed(2);
+        }
+    }
+    
+    // Tekil coin kopyalama
+    function copySingleCoin(symbol, event = null) {
+        if (event) {
+            event.stopPropagation();
         }
         
-        // Coin seçimini değiştir
-        function toggleCoinSelection(symbol, checkbox) {
+        const fullSymbol = symbol.includes('USDT') ? symbol : symbol + 'USDT';
+        
+        navigator.clipboard.writeText(fullSymbol).then(() => {
+            showNotification(`📋 ${fullSymbol} kopyalandı`);
+        }).catch(err => {
+            console.error('Kopyalama hatası:', err);
+            showNotification('❌ Kopyalama başarısız!', true);
+        });
+    }
+    
+    // Coin seçimini değiştir
+    function toggleCoinSelection(symbol, checkbox) {
+        if (checkbox.checked) {
+            selectedCoins.add(symbol);
+        } else {
+            selectedCoins.delete(symbol);
+        }
+        
+        // Coin sembolü görselini güncelle
+        const coinSymbol = checkbox.parentElement.querySelector('.coin-symbol');
+        if (coinSymbol) {
             if (checkbox.checked) {
-                selectedCoins.add(symbol);
+                coinSymbol.classList.add('selected');
             } else {
-                selectedCoins.delete(symbol);
+                coinSymbol.classList.remove('selected');
             }
-            
-            // Coin sembolü görselini güncelle
-            const coinSymbol = checkbox.parentElement.querySelector('.coin-symbol');
-            if (coinSymbol) {
-                if (checkbox.checked) {
-                    coinSymbol.classList.add('selected');
-                } else {
-                    coinSymbol.classList.remove('selected');
-                }
-            }
-            
-            // Seçili sayısını güncelle
-            updateSelectedCount();
-        }
-        
-        // Tüm coin'leri seç
-        function selectAllCoins() {
-            const alarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
-            const filteredAlarms = filterAlarms(alarms);
-            
-            selectedCoins.clear();
-            
-            filteredAlarms.forEach(alarm => {
-                selectedCoins.add(alarm.symbol);
-            });
-            
-            // Checkbox'ları güncelle
-            document.querySelectorAll('.coin-checkbox').forEach(checkbox => {
-                checkbox.checked = true;
-            });
-            
-            // Coin sembollerini güncelle
-            document.querySelectorAll('.coin-symbol').forEach(symbol => {
-                symbol.classList.add('selected');
-            });
-            
-            updateSelectedCount();
-            showNotification(`✅ ${selectedCoins.size} coin seçildi`);
-        }
-        
-        // Tüm seçimi temizle
-        function deselectAllCoins() {
-            selectedCoins.clear();
-            
-            // Checkbox'ları güncelle
-            document.querySelectorAll('.coin-checkbox').forEach(checkbox => {
-                checkbox.checked = false;
-            });
-            
-            // Coin sembollerini güncelle
-            document.querySelectorAll('.coin-symbol').forEach(symbol => {
-                symbol.classList.remove('selected');
-            });
-            
-            updateSelectedCount();
-            showNotification('✗ Seçim temizlendi');
-        }
-        
-        // Seçili coin'leri kopyala (satırlı, USDT ekli)
-        function copySelectedCoins() {
-            if (selectedCoins.size === 0) {
-                showNotification('⚠️ Kopyalamak için coin seçin!', true);
-                return;
-            }
-            
-            const coinList = Array.from(selectedCoins)
-                .map(symbol => symbol.includes('USDT') ? symbol : symbol + 'USDT')
-                .join('\n');
-            
-            navigator.clipboard.writeText(coinList).then(() => {
-                showNotification(`📋 ${selectedCoins.size} coin kopyalandı:\n${coinList}`);
-            }).catch(err => {
-                console.error('Toplu kopyalama hatası:', err);
-                showNotification('❌ Kopyalama başarısız!', true);
-            });
-        }
-        
-        // Tüm coin'leri kopyala (mevcut filtreye göre)
-        function copyAllCoins() {
-            const alarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
-            const filteredAlarms = filterAlarms(alarms);
-            
-            if (filteredAlarms.length === 0) {
-                showNotification('⚠️ Kopyalanacak coin yok!', true);
-                return;
-            }
-            
-            // Benzersiz coin'leri al
-            const uniqueCoins = new Set();
-            filteredAlarms.forEach(alarm => {
-                uniqueCoins.add(alarm.symbol);
-            });
-            
-            const coinList = Array.from(uniqueCoins)
-                .map(symbol => symbol.includes('USDT') ? symbol : symbol + 'USDT')
-                .join('\n');
-            
-            navigator.clipboard.writeText(coinList).then(() => {
-                showNotification(`📋 ${uniqueCoins.size} coin kopyalandı:\n${coinList}`);
-            }).catch(err => {
-                console.error('Tümünü kopyalama hatası:', err);
-                showNotification('❌ Kopyalama başarısız!', true);
-            });
         }
         
         // Seçili sayısını güncelle
-        function updateSelectedCount() {
-            document.getElementById('selectedCount').textContent = selectedCoins.size;
+        updateSelectedCount();
+    }
+    
+    // Tüm coin'leri seç
+    function selectAllCoins() {
+        const alarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
+        const filteredAlarms = filterAlarms(alarms);
+        
+        selectedCoins.clear();
+        
+        filteredAlarms.forEach(alarm => {
+            selectedCoins.add(alarm.symbol);
+        });
+        
+        // Checkbox'ları güncelle
+        document.querySelectorAll('.coin-checkbox').forEach(checkbox => {
+            checkbox.checked = true;
+        });
+        
+        // Coin sembollerini güncelle
+        document.querySelectorAll('.coin-symbol').forEach(symbol => {
+            symbol.classList.add('selected');
+        });
+        
+        updateSelectedCount();
+        showNotification(`✅ ${selectedCoins.size} coin seçildi`);
+    }
+    
+    // Tüm seçimi temizle
+    function deselectAllCoins() {
+        selectedCoins.clear();
+        
+        // Checkbox'ları güncelle
+        document.querySelectorAll('.coin-checkbox').forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        
+        // Coin sembollerini güncelle
+        document.querySelectorAll('.coin-symbol').forEach(symbol => {
+            symbol.classList.remove('selected');
+        });
+        
+        updateSelectedCount();
+        showNotification('✗ Seçim temizlendi');
+    }
+    
+    // Seçili coin'leri kopyala (satırlı, USDT ekli)
+    function copySelectedCoins() {
+        if (selectedCoins.size === 0) {
+            showNotification('⚠️ Kopyalamak için coin seçin!', true);
+            return;
         }
         
-        // Alarmları filtrele
-        function filterAlarms(alarms) {
-            return alarms.filter(alarm => {
-                // Coin filtre
-                if (currentFilters.coin !== 'all' && alarm.symbol !== currentFilters.coin) {
-                    return false;
-                }
-                
-                // Alarm tipi filtre
-                if (currentFilters.type !== 'all' && alarm.alarmType !== currentFilters.type) {
-                    return false;
-                }
-                
-                // Zaman filtre
-                if (currentFilters.time !== 'all') {
-                    const alarmTime = new Date(alarm.timestamp).getTime();
-                    const now = Date.now();
-                    let timeLimit = 0;
-                    
-                    switch(currentFilters.time) {
-                        case '1hour': timeLimit = 60 * 60 * 1000; break;
-                        case '3hours': timeLimit = 3 * 60 * 60 * 1000; break;
-                        case '6hours': timeLimit = 6 * 60 * 60 * 1000; break;
-                        case '12hours': timeLimit = 12 * 60 * 60 * 1000; break;
-                        case '24hours': timeLimit = 24 * 60 * 60 * 1000; break;
-                    }
-                    
-                    if (now - alarmTime > timeLimit) {
-                        return false;
-                    }
-                }
-                
-                return true;
-            });
+        const coinList = Array.from(selectedCoins)
+            .map(symbol => symbol.includes('USDT') ? symbol : symbol + 'USDT')
+            .join('\n');
+        
+        navigator.clipboard.writeText(coinList).then(() => {
+            showNotification(`📋 ${selectedCoins.size} coin kopyalandı:\n${coinList}`);
+        }).catch(err => {
+            console.error('Toplu kopyalama hatası:', err);
+            showNotification('❌ Kopyalama başarısız!', true);
+        });
+    }
+    
+    // Tüm coin'leri kopyala (mevcut filtreye göre)
+    function copyAllCoins() {
+        const alarms = JSON.parse(localStorage.getItem(ALARM_STORAGE_KEY)) || [];
+        const filteredAlarms = filterAlarms(alarms);
+        
+        if (filteredAlarms.length === 0) {
+            showNotification('⚠️ Kopyalanacak coin yok!', true);
+            return;
         }
         
-        // Coin filtre seçeneklerini güncelle
-        function updateCoinFilterOptions(alarms) {
-            const coinFilter = document.getElementById('coinFilter');
-            const coins = new Set();
-            
-            // Tüm alarmlardaki coin'leri topla
-            alarms.forEach(alarm => {
-                coins.add(alarm.symbol);
-            });
-            
-            // Mevcut seçenekleri temizle (ilk seçenek hariç)
-            while (coinFilter.options.length > 1) {
-                coinFilter.remove(1);
+        // Benzersiz coin'leri al
+        const uniqueCoins = new Set();
+        filteredAlarms.forEach(alarm => {
+            uniqueCoins.add(alarm.symbol);
+        });
+        
+        const coinList = Array.from(uniqueCoins)
+            .map(symbol => symbol.includes('USDT') ? symbol : symbol + 'USDT')
+            .join('\n');
+        
+        navigator.clipboard.writeText(coinList).then(() => {
+            showNotification(`📋 ${uniqueCoins.size} coin kopyalandı:\n${coinList}`);
+        }).catch(err => {
+            console.error('Tümünü kopyalama hatası:', err);
+            showNotification('❌ Kopyalama başarısız!', true);
+        });
+    }
+    
+    // Seçili sayısını güncelle
+    function updateSelectedCount() {
+        document.getElementById('selectedCount').textContent = selectedCoins.size;
+    }
+    
+    // Alarmları filtrele
+    function filterAlarms(alarms) {
+        return alarms.filter(alarm => {
+            // Coin filtre
+            if (currentFilters.coin !== 'all' && alarm.symbol !== currentFilters.coin) {
+                return false;
             }
             
-            // Coin'leri alfabetik sırayla ekle
-            Array.from(coins).sort().forEach(symbol => {
-                const option = document.createElement('option');
-                option.value = symbol;
-                option.textContent = `${symbol.replace('USDT', '')} (${symbol})`;
-                coinFilter.appendChild(option);
-            });
+            // Alarm tipi filtre
+            if (currentFilters.type !== 'all' && alarm.alarmType !== currentFilters.type) {
+                return false;
+            }
             
-            // Mevcut filtreyi uygula
-            coinFilter.value = currentFilters.coin;
-        }
-        
-        // İstatistikleri güncelle
-        function updateStatistics(alarms) {
-            const total = alarms.length;
-            const filtered = filterAlarms(alarms).length;
-            
-            // Alarm türlerine göre sayıları hesapla
-            let upperCount = 0, lowerCount = 0, highCount = 0, lowCount = 0;
-            let change15dCount = 0, change4sCount = 0, change1gCount = 0;
-            let emaAboveCount = 0, emaBelowCount = 0;
-            let liquidityPercentCount = 0;
-            
-            alarms.forEach(alarm => {
-                switch(alarm.alarmType) {
-                    case 'upper_liquidity': upperCount++; break;
-                    case 'lower_liquidity': lowerCount++; break;
-                    case '20m_high': highCount++; break;
-                    case '20m_low': lowCount++; break;
-                    case '15d_change': change15dCount++; break;
-                    case '4s_change': change4sCount++; break;
-                    case '1g_change': change1gCount++; break;
-                    case 'ema50_above': emaAboveCount++; break;
-                    case 'ema50_below': emaBelowCount++; break;
-                    case 'liquidity_percentage': liquidityPercentCount++; break;
+            // Zaman filtre
+            if (currentFilters.time !== 'all') {
+                const alarmTime = new Date(alarm.timestamp).getTime();
+                const now = Date.now();
+                let timeLimit = 0;
+                
+                switch(currentFilters.time) {
+                    case '1hour': timeLimit = 60 * 60 * 1000; break;
+                    case '3hours': timeLimit = 3 * 60 * 60 * 1000; break;
+                    case '6hours': timeLimit = 6 * 60 * 60 * 1000; break;
+                    case '12hours': timeLimit = 12 * 60 * 60 * 1000; break;
+                    case '24hours': timeLimit = 24 * 60 * 60 * 1000; break;
                 }
-            });
+                
+                if (now - alarmTime > timeLimit) {
+                    return false;
+                }
+            }
             
-            // İstatistikleri göster
-            document.getElementById('totalAlarms').textContent = total;
-            document.getElementById('filteredAlarms').textContent = filtered;
-            document.getElementById('upperAlarms').textContent = upperCount;
-            document.getElementById('lowerAlarms').textContent = lowerCount;
-            document.getElementById('highAlarms').textContent = highCount;
-            document.getElementById('lowAlarms').textContent = lowCount;
-            document.getElementById('change15dAlarms').textContent = change15dCount;
-            document.getElementById('change4sAlarms').textContent = change4sCount;
-            document.getElementById('change1gAlarms').textContent = change1gCount;
-            document.getElementById('emaAboveAlarms').textContent = emaAboveCount;
-            document.getElementById('emaBelowAlarms').textContent = emaBelowCount;
-            document.getElementById('liquidityPercentAlarms').textContent = liquidityPercentCount;
+            return true;
+        });
+    }
+    
+    // Coin filtre seçeneklerini güncelle
+    function updateCoinFilterOptions(alarms) {
+        const coinFilter = document.getElementById('coinFilter');
+        const coins = new Set();
+        
+        // Tüm alarmlardaki coin'leri topla
+        alarms.forEach(alarm => {
+            coins.add(alarm.symbol);
+        });
+        
+        // Mevcut seçenekleri temizle (ilk seçenek hariç)
+        while (coinFilter.options.length > 1) {
+            coinFilter.remove(1);
         }
         
-        // Filtreleri uygula
-        function applyFilters() {
-            currentFilters.coin = document.getElementById('coinFilter').value;
-            currentFilters.type = document.getElementById('typeFilter').value;
-            currentFilters.time = document.getElementById('timeFilter').value;
-            
-            // Hızlı filtre butonlarını güncelle
-            updateQuickFilterButtons();
-            
-            // Seçili coin'leri temizle (filtre değiştiğinde)
-            selectedCoins.clear();
-            
-            loadAlarms();
-        }
+        // Coin'leri alfabetik sırayla ekle
+        Array.from(coins).sort().forEach(symbol => {
+            const option = document.createElement('option');
+            option.value = symbol;
+            option.textContent = `${symbol.replace('USDT', '')} (${symbol})`;
+            coinFilter.appendChild(option);
+        });
+        
+        // Mevcut filtreyi uygula
+        coinFilter.value = currentFilters.coin;
+    }
+    
+    // İstatistikleri güncelle
+    function updateStatistics(alarms) {
+        const total = alarms.length;
+        const filtered = filterAlarms(alarms).length;
+        
+        // Alarm türlerine göre sayıları hesapla
+        let upperCount = 0, lowerCount = 0, highCount = 0, lowCount = 0;
+        let change15dCount = 0, change4sCount = 0, change1gCount = 0, priceChangeCount = 0;
+        let emaAboveCount = 0, emaBelowCount = 0;
+        let liquidityPercentCount = 0;
+        
+        alarms.forEach(alarm => {
+            switch(alarm.alarmType) {
+                case 'upper_liquidity': upperCount++; break;
+                case 'lower_liquidity': lowerCount++; break;
+                case '20m_high': highCount++; break;
+                case '20m_low': lowCount++; break;
+                case '15d_change': change15dCount++; break;
+                case '4s_change': change4sCount++; break;
+                case '1g_change': change1gCount++; break;
+                case 'price_change': priceChangeCount++; break;
+                case 'ema50_above': emaAboveCount++; break;
+                case 'ema50_below': emaBelowCount++; break;
+                case 'liquidity_percentage': liquidityPercentCount++; break;
+            }
+        });
+        
+        // İstatistikleri göster
+        document.getElementById('totalAlarms').textContent = total;
+        document.getElementById('filteredAlarms').textContent = filtered;
+        document.getElementById('upperAlarms').textContent = upperCount;
+        document.getElementById('lowerAlarms').textContent = lowerCount;
+        document.getElementById('highAlarms').textContent = highCount;
+        document.getElementById('lowAlarms').textContent = lowCount;
+        document.getElementById('change15dAlarms').textContent = change15dCount;
+        document.getElementById('change4sAlarms').textContent = change4sCount;
+        document.getElementById('change1gAlarms').textContent = change1gCount;
+        document.getElementById('emaAboveAlarms').textContent = emaAboveCount;
+        document.getElementById('emaBelowAlarms').textContent = emaBelowCount;
+        document.getElementById('liquidityPercentAlarms').textContent = liquidityPercentCount;
+    }
+    
+    // Filtreleri uygula
+    function applyFilters() {
+        currentFilters.coin = document.getElementById('coinFilter').value;
+        currentFilters.type = document.getElementById('typeFilter').value;
+        currentFilters.time = document.getElementById('timeFilter').value;
         
         // Hızlı filtre butonlarını güncelle
-        function updateQuickFilterButtons() {
-            const filterButtons = [
-                'upper', 'lower', 'high', 'low', 
-                '15d', '4s', '1g', 'ema-above', 'ema-below', 'liquidity-percent'
-            ];
+        updateQuickFilterButtons();
+        
+        // Seçili coin'leri temizle (filtre değiştiğinde)
+        selectedCoins.clear();
+        
+        loadAlarms();
+    }
+    
+    // Hızlı filtre butonlarını güncelle
+    function updateQuickFilterButtons() {
+        const filterButtons = [
+            'upper', 'lower', 'high', 'low', 
+            '15d', '4s', '1g', 'ema-above', 'ema-below', 'liquidity-percent'
+        ];
+        
+        filterButtons.forEach(type => {
+            const button = document.getElementById(`filter-${type}`);
+            const filterType = getFilterTypeFromButton(type);
             
-            filterButtons.forEach(type => {
-                const button = document.getElementById(`filter-${type}`);
-                const filterType = getFilterTypeFromButton(type);
-                
-                if (button) {
-                    if (currentFilters.type === filterType) {
-                        button.classList.add('active');
-                    } else {
-                        button.classList.remove('active');
-                    }
+            if (button) {
+                if (currentFilters.type === filterType) {
+                    button.classList.add('active');
+                } else {
+                    button.classList.remove('active');
                 }
-            });
-        }
-        
-        // Buton tipinden filtre tipine dönüştür
-        function getFilterTypeFromButton(buttonType) {
-            switch(buttonType) {
-                case 'upper': return 'upper_liquidity';
-                case 'lower': return 'lower_liquidity';
-                case 'high': return '20m_high';
-                case 'low': return '20m_low';
-                case '15d': return '15d_change';
-                case '4s': return '4s_change';
-                case '1g': return '1g_change';
-                case 'ema-above': return 'ema50_above';
-                case 'ema-below': return 'ema50_below';
-                case 'liquidity-percent': return 'liquidity_percentage';
-                default: return 'all';
             }
+        });
+    }
+    
+    // Buton tipinden filtre tipine dönüştür
+    function getFilterTypeFromButton(buttonType) {
+        switch(buttonType) {
+            case 'upper': return 'upper_liquidity';
+            case 'lower': return 'lower_liquidity';
+            case 'high': return '20m_high';
+            case 'low': return '20m_low';
+            case '15d': return '15d_change';
+            case '4s': return '4s_change';
+            case '1g': return '1g_change';
+            case 'ema-above': return 'ema50_above';
+            case 'ema-below': return 'ema50_below';
+            case 'liquidity-percent': return 'liquidity_percentage';
+            default: return 'all';
+        }
+    }
+    
+    // Hızlı filtre butonuna tıklandığında
+    function toggleFilter(filterKey, filterValue) {
+        if (currentFilters[filterKey] === filterValue) {
+            // Aynı filtreye tekrar tıklandığında filtreyi kaldır
+            currentFilters[filterKey] = 'all';
+            document.getElementById('typeFilter').value = 'all';
+        } else {
+            // Yeni filtre uygula
+            currentFilters[filterKey] = filterValue;
+            document.getElementById('typeFilter').value = filterValue;
         }
         
-        // Hızlı filtre butonuna tıklandığında
-        function toggleFilter(filterKey, filterValue) {
-            if (currentFilters[filterKey] === filterValue) {
-                // Aynı filtreye tekrar tıklandığında filtreyi kaldır
-                currentFilters[filterKey] = 'all';
-                document.getElementById('typeFilter').value = 'all';
-            } else {
-                // Yeni filtre uygula
-                currentFilters[filterKey] = filterValue;
-                document.getElementById('typeFilter').value = filterValue;
-            }
-            
-            // Seçili coin'leri temizle (filtre değiştiğinde)
-            selectedCoins.clear();
-            
-            loadAlarms();
-        }
+        // Seçili coin'leri temizle (filtre değiştiğinde)
+        selectedCoins.clear();
         
-        // Tüm alarmları temizle
-        function clearAllAlarms() {
-            if (confirm('Tüm alarm mesajlarını silmek istediğinize emin misiniz?')) {
-                localStorage.removeItem(ALARM_STORAGE_KEY);
-                localStorage.removeItem(VOLUME_STORAGE_KEY);
-                currentFilters = { coin: 'all', type: 'all', time: 'all' };
-                selectedCoins.clear();
-                resetFilters();
-                loadAlarms();
-                showNotification('🗑️ Tüm alarmlar ve hacim verileri temizlendi');
-            }
-        }
-        
-        // Filtreleri temizle
-        function clearFilters() {
+        loadAlarms();
+    }
+    
+    // Tüm alarmları temizle
+    function clearAllAlarms() {
+        if (confirm('Tüm alarm mesajlarını ve hacim verilerini silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!')) {
+            localStorage.removeItem(ALARM_STORAGE_KEY);
+            localStorage.removeItem(VOLUME_STORAGE_KEY);
             currentFilters = { coin: 'all', type: 'all', time: 'all' };
             selectedCoins.clear();
             resetFilters();
             loadAlarms();
-            showNotification('🧹 Filtreler temizlendi');
+            showNotification('🗑️ Tüm alarmlar ve hacim verileri temizlendi');
+        }
+    }
+    
+    // Filtreleri temizle
+    function clearFilters() {
+        currentFilters = { coin: 'all', type: 'all', time: 'all' };
+        selectedCoins.clear();
+        resetFilters();
+        loadAlarms();
+        showNotification('🧹 Filtreler temizlendi');
+    }
+    
+    // Filtreleri sıfırla
+    function resetFilters() {
+        document.getElementById('coinFilter').value = 'all';
+        document.getElementById('typeFilter').value = 'all';
+        document.getElementById('timeFilter').value = 'all';
+        updateQuickFilterButtons();
+        updateFilterInfo();
+    }
+    
+    // Alarmları yenile
+    async function refreshAlarms() {
+        console.log('Alarmlar manuel yenileniyor...');
+        showNotification('🔄 Alarmlar yenileniyor...');
+        await loadAlarms();
+        showNotification('✅ Alarmlar yenilendi');
+    }
+    
+    // Ne kadar zaman önce hesapla
+    function getTimeAgo(date) {
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+        
+        if (diffDays > 0) {
+            return `${diffDays} gün önce`;
+        } else if (diffHours > 0) {
+            return `${diffHours} saat önce`;
+        } else if (diffMins > 0) {
+            return `${diffMins} dakika önce`;
+        } else {
+            return 'az önce';
+        }
+    }
+    
+    // Alarm yok mesajı
+    function getNoAlarmsMessage() {
+        if (currentFilters.coin !== 'all' || currentFilters.type !== 'all' || currentFilters.time !== 'all') {
+            return 'Filtreye uygun alarm bulunamadı';
+        }
+        return 'Henüz alarm mesajı yok';
+    }
+    
+    // Filtre bilgisi metni
+    function getFilterInfoText() {
+        const parts = [];
+        
+        if (currentFilters.coin !== 'all') {
+            parts.push(`Coin: ${currentFilters.coin.replace('USDT', '')}`);
         }
         
-        // Filtreleri sıfırla
-        function resetFilters() {
-            document.getElementById('coinFilter').value = 'all';
-            document.getElementById('typeFilter').value = 'all';
-            document.getElementById('timeFilter').value = 'all';
-            updateQuickFilterButtons();
-            updateFilterInfo();
+        if (currentFilters.type !== 'all') {
+            const typeName = alarmTypeClasses[currentFilters.type]?.name || currentFilters.type;
+            parts.push(`Tür: ${typeName}`);
         }
         
-        // Alarmları yenile
-        function refreshAlarms() {
-            loadAlarms();
-            showNotification('🔄 Alarmlar yenilendi');
+        if (currentFilters.time !== 'all') {
+            const timeNames = {
+                '1hour': 'Son 1 Saat',
+                '3hours': 'Son 3 Saat',
+                '6hours': 'Son 6 Saat',
+                '12hours': 'Son 12 Saat',
+                '24hours': 'Son 24 Saat'
+            };
+            parts.push(`Zaman: ${timeNames[currentFilters.time] || currentFilters.time}`);
         }
         
-        // Ne kadar zaman önce hesapla
-        function getTimeAgo(date) {
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMins / 60);
-            const diffDays = Math.floor(diffHours / 24);
-            
-            if (diffDays > 0) {
-                return `${diffDays} gün önce`;
-            } else if (diffHours > 0) {
-                return `${diffHours} saat önce`;
-            } else if (diffMins > 0) {
-                return `${diffMins} dakika önce`;
-            } else {
-                return 'az önce';
-            }
+        if (parts.length > 0) {
+            return `Aktif filtreler: ${parts.join(', ')}`;
         }
         
-        // Alarm yok mesajı
-        function getNoAlarmsMessage() {
-            if (currentFilters.coin !== 'all' || currentFilters.type !== 'all' || currentFilters.time !== 'all') {
-                return 'Filtreye uygun alarm bulunamadı';
-            }
-            return 'Henüz alarm mesajı yok';
+        return 'Coinler seviyelere yaklaştığında mesajlar burada görünecek';
+    }
+    
+    // Filtre bilgisini güncelle
+    function updateFilterInfo() {
+        const filterInfo = document.getElementById('filterInfo');
+        const activeFiltersText = document.getElementById('activeFiltersText');
+        
+        const parts = [];
+        
+        if (currentFilters.coin !== 'all') {
+            parts.push(`Coin: ${currentFilters.coin.replace('USDT', '')}`);
         }
         
-        // Filtre bilgisi metni
-        function getFilterInfoText() {
-            const parts = [];
-            
-            if (currentFilters.coin !== 'all') {
-                parts.push(`Coin: ${currentFilters.coin.replace('USDT', '')}`);
-            }
-            
-            if (currentFilters.type !== 'all') {
-                const typeName = alarmTypeClasses[currentFilters.type]?.name || currentFilters.type;
-                parts.push(`Tür: ${typeName}`);
-            }
-            
-            if (currentFilters.time !== 'all') {
-                const timeNames = {
-                    '1hour': 'Son 1 Saat',
-                    '3hours': 'Son 3 Saat',
-                    '6hours': 'Son 6 Saat',
-                    '12hours': 'Son 12 Saat',
-                    '24hours': 'Son 24 Saat'
-                };
-                parts.push(`Zaman: ${timeNames[currentFilters.time] || currentFilters.time}`);
-            }
-            
-            if (parts.length > 0) {
-                return `Aktif filtreler: ${parts.join(', ')}`;
-            }
-            
-            return 'Coinler seviyelere yaklaştığında mesajlar burada görünecek';
+        if (currentFilters.type !== 'all') {
+            const typeName = alarmTypeClasses[currentFilters.type]?.name || currentFilters.type;
+            parts.push(`Tür: ${typeName}`);
         }
         
-        // Filtre bilgisini güncelle
-        function updateFilterInfo() {
-            const filterInfo = document.getElementById('filterInfo');
-            const activeFiltersText = document.getElementById('activeFiltersText');
-            
-            const parts = [];
-            
-            if (currentFilters.coin !== 'all') {
-                parts.push(`Coin: ${currentFilters.coin.replace('USDT', '')}`);
-            }
-            
-            if (currentFilters.type !== 'all') {
-                const typeName = alarmTypeClasses[currentFilters.type]?.name || currentFilters.type;
-                parts.push(`Tür: ${typeName}`);
-            }
-            
-            if (currentFilters.time !== 'all') {
-                const timeNames = {
-                    '1hour': 'Son 1 Saat',
-                    '3hours': 'Son 3 Saat',
-                    '6hours': 'Son 6 Saat',
-                    '12hours': 'Son 12 Saat',
-                    '24hours': 'Son 24 Saat'
-                };
-                parts.push(`Zaman: ${timeNames[currentFilters.time] || currentFilters.time}`);
-            }
-            
-            if (parts.length > 0) {
-                activeFiltersText.textContent = `Aktif Filtreler: ${parts.join(' • ')}`;
-                filterInfo.style.display = 'block';
-            } else {
-                filterInfo.style.display = 'none';
-            }
+        if (currentFilters.time !== 'all') {
+            const timeNames = {
+                '1hour': 'Son 1 Saat',
+                '3hours': 'Son 3 Saat',
+                '6hours': 'Son 6 Saat',
+                '12hours': 'Son 12 Saat',
+                '24hours': 'Son 24 Saat'
+            };
+            parts.push(`Zaman: ${timeNames[currentFilters.time] || currentFilters.time}`);
         }
         
-        // Bildirim göster
-        function showNotification(message, isError = false) {
-            // Mevcut bildirimleri temizle
-            const existingNotification = document.querySelector('.notification');
-            if (existingNotification) {
-                existingNotification.remove();
-            }
-            
-            // Yeni bildirim oluştur
-            const notification = document.createElement('div');
-            notification.className = 'notification';
-            notification.textContent = message;
-            notification.style.backgroundColor = isError ? '#f38ba8' : '#a6e3a1';
-            notification.style.color = '#1e1e2e';
-            
-            // Çok satırlı mesajlar için
-            if (message.includes('\n')) {
-                notification.style.whiteSpace = 'pre-line';
-                notification.style.textAlign = 'left';
-                notification.style.maxWidth = '400px';
-            }
-            
-            document.body.appendChild(notification);
-            
-            // 3 saniye sonra kaldır
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
-            }, 3000);
+        if (parts.length > 0) {
+            activeFiltersText.textContent = `Aktif Filtreler: ${parts.join(' • ')}`;
+            filterInfo.style.display = 'block';
+        } else {
+            filterInfo.style.display = 'none';
         }
+    }
+    
+    // Bildirim göster
+    function showNotification(message, isError = false) {
+        // Mevcut bildirimleri temizle
+        const existingNotification = document.querySelector('.notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+        
+        // Yeni bildirim oluştur
+        const notification = document.createElement('div');
+        notification.className = 'notification';
+        notification.textContent = message;
+        notification.style.backgroundColor = isError ? '#f38ba8' : '#a6e3a1';
+        notification.style.color = '#1e1e2e';
+        
+        // Çok satırlı mesajlar için
+        if (message.includes('\n')) {
+            notification.style.whiteSpace = 'pre-line';
+            notification.style.textAlign = 'left';
+            notification.style.maxWidth = '400px';
+        }
+        
+        document.body.appendChild(notification);
+        
+        // 3 saniye sonra kaldır
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 3000);
+    }
+    
+    // Sayfa yüklendiğinde
+    window.onload = async function() {
+        console.log('Alarm sayfası yükleniyor...');
+        
+        // Test: API'ler çalışıyor mu?
+        try {
+            const testResponse = await fetch('/api/alarms');
+            console.log('API testi:', testResponse.ok ? 'BAŞARILI' : 'BAŞARISIZ');
+        } catch (error) {
+            console.error('API bağlantı hatası:', error);
+        }
+        
+        // Alarmları yükle
+        await loadAlarms();
+        
+        // Hızlı filtre butonlarını güncelle
+        updateQuickFilterButtons();
+        
+        console.log('Alarm sayfası hazır');
         
         // Her 30 saniyede bir otomatik yenile
-        function startAutoRefresh() {
-            setInterval(loadAlarms, 30000);
-        }
+        setInterval(async () => {
+            console.log('Otomatik yenileme...');
+            await loadAlarms();
+        }, 30000);
         
-        // Sayfa yüklendiğinde
-        window.onload = function() {
-            loadAlarms();
-            startAutoRefresh();
-            
-            // 10 saniye sonra tekrar yükle (ilk yükleme için)
-            setTimeout(loadAlarms, 10000);
-        };
-    </script>
+        // 10 saniye sonra tekrar yükle (ilk yükleme için)
+        setTimeout(async () => {
+            console.log('İlk yenileme...');
+            await loadAlarms();
+        }, 10000);
+    };
+</script>
 </body>
 </html>
